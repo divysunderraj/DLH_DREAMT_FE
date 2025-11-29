@@ -46,66 +46,159 @@ X_test, y_test, group_test = train_test_split(SW_df, test_sids, final_features, 
 # Resample all the data
 X_train_resampled, y_train_resampled, group_train_resampled = resample_data(X_train, y_train, group_train, group_variable)
 
-# Run LightGBM model
 final_lgb_model = LightGBM_engine(X_train_resampled, y_train_resampled, X_val, y_val)
-# calculate training scores
-prob_ls_train, len_train, true_ls_train = compute_probabilities(
-    train_sids, SW_df, final_features, "lgb", final_lgb_model, group_variable)
-lgb_train_results_df = LightGBM_result(final_lgb_model, X_train, y_train, prob_ls_train, true_ls_train)
 
-# calculate testing scores
-prob_ls_test, len_test, true_ls_test = compute_probabilities(
-    test_sids, SW_df, final_features, "lgb", final_lgb_model, group_variable)
-lgb_test_results_df = LightGBM_result(final_lgb_model, X_test, y_test, prob_ls_test, true_ls_test)
+# ---- LightGBM Train Probabilities ----
+lgb_prob_ls_train, lgb_len_train, lgb_true_ls_train = compute_probabilities(
+    train_sids, SW_df, final_features, "lgb", final_lgb_model, group_variable
+)
+lgb_train_results_df = LightGBM_result(
+    final_lgb_model, X_train, y_train, lgb_prob_ls_train, lgb_true_ls_train
+)
 
-# Identify best features
+# ---- LightGBM Test Probabilities ----
+lgb_prob_ls_test, lgb_len_test, lgb_true_ls_test = compute_probabilities(
+    test_sids, SW_df, final_features, "lgb", final_lgb_model, group_variable
+)
+lgb_test_results_df = LightGBM_result(
+    final_lgb_model, X_test, y_test, lgb_prob_ls_test, lgb_true_ls_test
+)
+
+# ---- SHAP for LightGBM ----
 explainer = shap.TreeExplainer(final_lgb_model)
 shap_values = explainer.shap_values(X_train)
 shap.summary_plot(shap_values, X_train, plot_type="bar", feature_names=final_features)
 
-# Add LSTM for post processing
-# create train data
-dataloader_train = LSTM_dataloader(
-    prob_ls_train, len_train, true_ls_train, batch_size=32
+
+# =============================
+# LSTM ON TOP OF LIGHTGBM
+# =============================
+lgb_dataloader_train = LSTM_dataloader(
+    lgb_prob_ls_train, lgb_len_train, lgb_true_ls_train, batch_size=32
+)
+lgb_dataloader_test = LSTM_dataloader(
+    lgb_prob_ls_test, lgb_len_test, lgb_true_ls_test, batch_size=1
 )
 
-# Run LSTM model
-LSTM_model = LSTM_engine(dataloader_train, num_epoch=300, hidden_layer_size=32, learning_rate=0.001) # set your num_epoch
-
-# test LSMT model
-dataloader_test = LSTM_dataloader(
-    prob_ls_test, len_test, true_ls_test, batch_size=1
+lgb_LSTM_model = LSTM_engine(
+    lgb_dataloader_train, num_epoch=5, hidden_layer_size=32, learning_rate=0.001
 )
-lgb_lstm_test_results_df = LSTM_eval(LSTM_model, dataloader_test, true_ls_test, 'LightGBM_LSTM')
-
-
-# Run GPBoost model
-final_gpb_model = GPBoost_engine(X_train_resampled, group_train_resampled, y_train_resampled, X_val, y_val, group_val)
-# calculate training scores
-prob_ls_train, len_train, true_ls_train = compute_probabilities(
-    train_sids, SW_df, final_features, 'gpb', final_gpb_model, group_variable)
-gpb_train_results_df = GPBoost_result(final_gpb_model, X_train, y_train, group_train, prob_ls_train, true_ls_train)
-
-# calculate testing scores
-prob_ls_test, len_test, true_ls_test = compute_probabilities(
-    test_sids, SW_df, final_features, 'gpb', final_gpb_model, group_variable)
-gpb_test_results_df = GPBoost_result(final_gpb_model, X_test, y_test, group_test, prob_ls_test, true_ls_test)
-
-
-# Get LSTM dataset
-dataloader_train = LSTM_dataloader(
-    prob_ls_train, len_train, true_ls_train, batch_size=32
-)
-dataloader_test = LSTM_dataloader(
-    prob_ls_test, len_test, true_ls_test, batch_size=1
+lgb_lstm_test_results_df = LSTM_eval(
+    lgb_LSTM_model, lgb_dataloader_test, lgb_true_ls_test, "LightGBM_LSTM"
 )
 
-# Run LSTM model
-LSTM_model = LSTM_engine(dataloader_train, num_epoch=300, hidden_layer_size=32, learning_rate = 0.001) # set your num_epoch
-gpb_lstm_test_results_df = LSTM_eval(LSTM_model, dataloader_test, true_ls_test, 'GPBoost_LSTM')
 
-# overall result
-overall_result = pd.concat([lgb_test_results_df, lgb_lstm_test_results_df, 
-                            gpb_test_results_df, gpb_lstm_test_results_df])
+# =============================
+# GPBOOST MODEL
+# =============================
+final_gpb_model = GPBoost_engine(
+    X_train_resampled, group_train_resampled, y_train_resampled,
+    X_val, y_val, group_val
+)
+
+# ---- GPBoost Train Probabilities ----
+gpb_prob_ls_train, gpb_len_train, gpb_true_ls_train = compute_probabilities(
+    train_sids, SW_df, final_features, 'gpb', final_gpb_model, group_variable
+)
+gpb_train_results_df = GPBoost_result(
+    final_gpb_model, X_train, y_train, group_train,
+    gpb_prob_ls_train, gpb_true_ls_train
+)
+
+# ---- GPBoost Test Probabilities ----
+gpb_prob_ls_test, gpb_len_test, gpb_true_ls_test = compute_probabilities(
+    test_sids, SW_df, final_features, 'gpb', final_gpb_model, group_variable
+)
+gpb_test_results_df = GPBoost_result(
+    final_gpb_model, X_test, y_test, group_test,
+    gpb_prob_ls_test, gpb_true_ls_test
+)
+
+
+# =============================
+# LSTM ON TOP OF GPBOOST
+# =============================
+gpb_dataloader_train = LSTM_dataloader(
+    gpb_prob_ls_train, gpb_len_train, gpb_true_ls_train, batch_size=32
+)
+gpb_dataloader_test = LSTM_dataloader(
+    gpb_prob_ls_test, gpb_len_test, gpb_true_ls_test, batch_size=1
+)
+
+gpb_LSTM_model = LSTM_engine(
+    gpb_dataloader_train, num_epoch=5, hidden_layer_size=32, learning_rate=0.001
+)
+gpb_lstm_test_results_df = LSTM_eval(
+    gpb_LSTM_model, gpb_dataloader_test, gpb_true_ls_test, "GPBoost_LSTM"
+)
+
+
+# =============================
+# TRANSFORMER ON TOP OF LIGHTGBM
+# =============================
+lgb_transformer_train = LSTM_dataloader(
+    lgb_prob_ls_train, lgb_len_train, lgb_true_ls_train, batch_size=32
+)
+lgb_transformer_test = LSTM_dataloader(
+    lgb_prob_ls_test, lgb_len_test, lgb_true_ls_test, batch_size=1
+)
+
+Transformer_model_lgb = Transformer_engine(
+    lgb_transformer_train,
+    num_epoch=5,
+    d_model=128,
+    nhead=8,
+    hidden_dim=256,
+    learning_rate=0.001
+)
+
+lgb_transformer_test_results_df = Transformer_eval(
+    Transformer_model_lgb,
+    lgb_transformer_test,
+    lgb_true_ls_test,
+    "LightGBM_Transformer"
+)
+
+
+# =============================
+# TRANSFORMER ON TOP OF GPBOOST
+# =============================
+gpb_transformer_train = LSTM_dataloader(
+    gpb_prob_ls_train, gpb_len_train, gpb_true_ls_train, batch_size=32
+)
+gpb_transformer_test = LSTM_dataloader(
+    gpb_prob_ls_test, gpb_len_test, gpb_true_ls_test, batch_size=1
+)
+
+Transformer_model_gpb = Transformer_engine(
+    gpb_transformer_train,
+    num_epoch=5,
+    d_model=128,
+    nhead=8,
+    hidden_dim=256,
+    learning_rate=0.001
+)
+
+gpb_transformer_test_results_df = Transformer_eval(
+    Transformer_model_gpb,
+    gpb_transformer_test,
+    gpb_true_ls_test,
+    "GPBoost_Transformer"
+)
+
+
+# =============================
+# COMBINE ALL RESULTS
+# =============================
+overall_result = pd.concat([
+    lgb_test_results_df,
+    lgb_lstm_test_results_df,
+    lgb_transformer_test_results_df,
+    gpb_test_results_df,
+    gpb_lstm_test_results_df,
+    gpb_transformer_test_results_df
+])
+
+overall_result.to_csv("overall_result.csv")
 print(group_variable)
 print(overall_result)

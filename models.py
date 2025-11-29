@@ -34,6 +34,105 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 np.random.seed(1)
 
+import torch
+import torch.nn as nn
+
+class TransformerSleepModel(nn.Module):
+    """
+    A simple Transformer model for sequence classification.
+    Input: (batch, seq_len, num_features)
+    Output: (batch, seq_len, num_classes)
+    """
+    def __init__(self, num_features, num_classes=2, d_model=128, nhead=8, num_layers=2, dim_feedforward=256, dropout=0.1):
+        super(TransformerSleepModel, self).__init__()
+        self.input_proj = nn.Linear(num_features, d_model)
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            batch_first=True
+        )
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.classifier = nn.Linear(d_model, num_classes)
+
+    def forward(self, x, lengths=None):
+        """
+        x: (batch, seq_len, num_features)
+        lengths: optional, not used here but kept for interface compatibility
+        """
+        x = self.input_proj(x)  # Project features to d_model
+        x = self.transformer_encoder(x)  # (batch, seq_len, d_model)
+        out = self.classifier(x)  # (batch, seq_len, num_classes)
+        return out
+
+def Transformer_eval(model, dataloader, list_true_stages, model_name):
+    """
+    Evaluate the Transformer model in the same style as LSTM_eval.
+    Returns the same kind of metrics DataFrame.
+    """
+    device = next(model.parameters()).device
+    model.eval()
+    list_probabilities_subject = []
+
+    with torch.no_grad():
+        for batch in dataloader:
+            X = batch['sample'].to(device)
+            lengths = batch['length'].to(device)
+
+            outputs = model(X, lengths)  # (batch, seq_len, num_classes)
+            probs = torch.softmax(outputs, dim=-1).cpu().numpy()
+
+            # Keep per-subject sequences for metrics like LSTM_eval
+            for seq_probs in probs:
+                list_probabilities_subject.append(seq_probs)
+
+    # Reuse your existing utils function
+    from utils import calculate_kappa, plot_cm, calculate_metrics
+
+    # Flatten for plotting
+    y_pred_flat = np.concatenate([np.argmax(arr, axis=1) for arr in list_probabilities_subject])
+    y_true_flat = np.concatenate(list_true_stages)
+
+    plot_cm(list_probabilities_subject, list_true_stages, model_name)
+
+    # Return exactly the same kind of DataFrame as LSTM_eval
+    return calculate_metrics(
+        y_test=y_true_flat,
+        y_pred_proba=np.vstack([arr for arr in list_probabilities_subject]),
+        model_name=model_name
+    )
+
+def Transformer_engine(dataloader_train, num_epoch=50, d_model=128, nhead=8, hidden_dim=256, learning_rate=0.001):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    num_features = dataloader_train.dataset[0]["sample"].shape[-1]
+    num_classes = 2
+
+    model = TransformerSleepModel(num_features, num_classes=num_classes, d_model=d_model,
+                                  nhead=nhead, num_layers=2, dim_feedforward=hidden_dim).to(device)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-5)
+    loss_function = nn.CrossEntropyLoss()
+
+    for epoch in range(num_epoch):
+        model.train()
+        total_loss = 0
+        for batch in dataloader_train:
+            X = batch["sample"].to(device)
+            y = batch["label"].to(device)
+            optimizer.zero_grad()
+            outputs = model(X)  # (batch, seq_len, num_classes)
+            outputs = outputs.view(-1, num_classes)
+            y = y.view(-1)
+            loss = loss_function(outputs, y)
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+        if (epoch+1) % 10 == 0:
+            print(f"Epoch {epoch+1}, Loss={total_loss/len(dataloader_train):.4f}")
+
+    return model
+
 
 class BiLSTMPModel(nn.Module):
     def __init__(self, input_size, hidden_layer_size, output_size=2, dropout=0.5):

@@ -7,7 +7,9 @@ import seaborn as sns
 from sklearn.metrics import accuracy_score, confusion_matrix, recall_score, precision_score, f1_score, auc, precision_recall_curve, roc_auc_score, cohen_kappa_score
 from sklearn.base import TransformerMixin
 
-from scipy.signal import gaussian, convolve, windows
+# from scipy.signal import gaussian, convolve, windows
+from scipy.signal import convolve, windows
+from scipy.signal.windows import gaussian
 from scipy.ndimage import gaussian_filter1d
 
 import torch
@@ -578,6 +580,30 @@ def plot_cm(list_probabilities_subject, list_true_stages, model_name):
     )
     title = str(model_name) + ' Confusion Matrix'
     plt.title(title)
+    plt.xlabel("Predicted Label")
+    plt.ylabel("True Label")
+    plt.show()
+
+def plot_cm_flat(y_pred, y_true, model_name):
+    from sklearn.metrics import confusion_matrix
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    cm = confusion_matrix(y_true, y_pred)
+    class_names = ["Sleep", "Wake"]
+    cm_percent = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis]
+    print(cm)
+
+    plt.figure(figsize=(4, 3))
+    sns.heatmap(
+        cm_percent,
+        annot=True,
+        fmt=".2%",
+        cmap="Greens",
+        xticklabels=class_names,
+        yticklabels=class_names,
+    )
+    plt.title(f"{model_name} Confusion Matrix")
     plt.xlabel("Predicted Label")
     plt.ylabel("True Label")
     plt.show()
