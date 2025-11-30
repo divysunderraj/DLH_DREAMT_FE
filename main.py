@@ -37,7 +37,7 @@ test_sids = [subj for subj in remaining_sids if subj not in val_sids]
 group_variables = ["AHI_Severity", "Obesity"]
 # when idx == 0, it returns ['AHI_Severity'], the first variable in the list
 # when idx == 1, it returns ['Obesity'], the second variable in the list
-group_variable = get_variable(group_variables, idx=0)
+group_variable = get_variable(group_variables, idx=1)
 
 X_train, y_train, group_train = train_test_split(SW_df, train_sids, final_features, group_variable)
 X_val, y_val, group_val = train_test_split(SW_df, val_sids, final_features, group_variable)
